@@ -21,13 +21,18 @@ def text_to_speech(api_key: str, text: str, model_id: str,
                    style_exaggeration: float, speed: float,
                    voice_name: str, voice_map: dict):
     voice_id = voice_map.get(voice_name, voice_name)
+    # Clamp parameters to valid ranges
+    stability = max(0.0, min(1.0, stability))
+    similarity_boost = max(0.0, min(1.0, similarity_boost))
+    style_exaggeration = max(0.0, min(1.0, style_exaggeration))
+    speed = max(0.7, min(1.2, speed))
     payload = {
         "text": text,
         "model_id": model_id,
         "voice_settings": {
             "stability": stability,
             "similarity_boost": similarity_boost,
-            "style": style_exaggeration,
+            "style_exaggeration": style_exaggeration,
             "use_speaker_boost": True,
             "speed": speed,
         },
@@ -85,10 +90,10 @@ def build_interface():
                 "eleven_monolingual_v1",
                 "eleven_multilingual_v2",
             ], label="Modello vocale", value="eleven_multilingual_v2")
-            similarity = gr.Slider(0, 1, 0.5, label="similarity_boost")
-            stability = gr.Slider(0, 1, 0.5, label="stability")
-            style = gr.Slider(0, 1, 0.0, label="style_exaggeration")
-            speed = gr.Slider(0.1, 4, 1.0, label="speed")
+            similarity = gr.Slider(0, 1, value=0.5, label="similarity_boost")
+            stability = gr.Slider(0, 1, value=0.5, label="stability")
+            style = gr.Slider(0, 1, value=0.0, label="style_exaggeration")
+            speed = gr.Slider(0.7, 1.2, value=1.0, label="speed")
             tts_btn = gr.Button("Genera Audio")
             audio_output = gr.Audio(label="Output")
 
