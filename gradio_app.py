@@ -21,11 +21,11 @@ def text_to_speech(api_key: str, text: str, model_id: str,
                    style_exaggeration: float, speed: float,
                    voice_name: str, voice_map: dict):
     voice_id = voice_map.get(voice_name, voice_name)
-    # Clamp parameters to valid ranges
-    stability = max(0.0, min(1.0, stability))
-    similarity_boost = max(0.0, min(1.0, similarity_boost))
-    style_exaggeration = max(0.0, min(1.0, style_exaggeration))
-    speed = max(0.7, min(1.2, speed))
+    # clamp parameters to valid range
+    stability = max(0.0, min(stability, 1.0))
+    similarity_boost = max(0.0, min(similarity_boost, 1.0))
+    style_exaggeration = max(0.0, min(style_exaggeration, 1.0))
+    speed = max(0.7, min(speed, 1.2))
     payload = {
         "text": text,
         "model_id": model_id,
@@ -51,7 +51,7 @@ def voice_changer_batch(api_key: str, audio_files: list, voice_name: str,
     for f in audio_files:
         with open(f.name, "rb") as file_data:
             files = {"audio": (os.path.basename(f.name), file_data, "audio/mpeg")}
-            url = f"{ELEVEN_BASE_URL}/v1/voice-changer/{voice_id}/stream"
+            url = f"{ELEVEN_BASE_URL}/v1/voice-conversion/{voice_id}/stream"
             resp = requests.post(url, headers=headers(api_key), files=files)
             resp.raise_for_status()
             out_path = os.path.join(output_dir, os.path.basename(f.name))
@@ -59,6 +59,30 @@ def voice_changer_batch(api_key: str, audio_files: list, voice_name: str,
                 out_f.write(resp.content)
             results.append(out_path)
     return "\n".join(results)
+
+
+def voice_changer_single(api_key: str, audio_bytes: bytes, voice_name: str,
+                         voice_map: dict, stability: float, similarity_boost: float,
+                         style_exaggeration: float) -> bytes:
+    """Convert an in-memory audio to another voice and return the bytes."""
+    if audio_bytes is None:
+        raise gr.Error("Nessun audio da convertire: genera prima un clip TTS")
+
+    voice_id = voice_map.get(voice_name, voice_name)
+    stability = max(0.0, min(stability, 1.0))
+    similarity_boost = max(0.0, min(similarity_boost, 1.0))
+    style_exaggeration = max(0.0, min(style_exaggeration, 1.0))
+
+    files = {"audio": ("input.mp3", audio_bytes, "audio/mpeg")}
+    data = {
+        "stability": str(stability),
+        "similarity_boost": str(similarity_boost),
+        "style_exaggeration": str(style_exaggeration),
+    }
+    url = f"{ELEVEN_BASE_URL}/v1/speech-to-speech/{voice_id}/stream"
+    resp = requests.post(url, headers=headers(api_key), files=files, data=data)
+    resp.raise_for_status()
+    return resp.content
 
 
 def clone_voice(api_key: str, name: str, description: str, audio_files: list):
@@ -90,22 +114,39 @@ def build_interface():
                 "eleven_monolingual_v1",
                 "eleven_multilingual_v2",
             ], label="Modello vocale", value="eleven_multilingual_v2")
-            similarity = gr.Slider(0, 1, value=0.5, label="similarity_boost")
-            stability = gr.Slider(0, 1, value=0.5, label="stability")
-            style = gr.Slider(0, 1, value=0.0, label="style_exaggeration")
-            speed = gr.Slider(0.7, 1.2, value=1.0, label="speed")
+            similarity = gr.Slider(0, 1, 0.5, label="similarity_boost")
+            stability = gr.Slider(0, 1, 0.5, label="stability")
+            style = gr.Slider(0, 1, 0.0, label="style_exaggeration")
+            speed = gr.Slider(0.7, 1.2, 1.0, label="speed")
             tts_btn = gr.Button("Genera Audio")
             audio_output = gr.Audio(label="Output")
+            tts_state = gr.State(value=None)
+
+            gr.Markdown("### Cambia voce dell'audio generato")
+            target_voice = gr.Dropdown(label="Voce target")
+            stab_conv = gr.Slider(0, 1, 0.5, label="stability")
+            sim_conv = gr.Slider(0, 1, 0.5, label="similarity_boost")
+            style_conv = gr.Slider(0, 1, 0.0, label="style_exaggeration")
+            change_btn = gr.Button("Cambia Voce")
+            changed_audio = gr.Audio(label="Output convertito")
+
+            change_btn.click(
+                lambda key, data, vname, vmap, stab, sim, sty: voice_changer_single(
+                    key, data, vname, vmap, stab, sim, sty
+                ),
+                inputs=[api_key, tts_state, target_voice, voices_state, stab_conv, sim_conv, style_conv],
+                outputs=changed_audio,
+            )
 
             refresh_btn.click(refresh_voices, inputs=api_key,
                               outputs=[voice_dropdown, voices_state])
+            refresh_btn.click(refresh_voices, inputs=api_key,
+                              outputs=[target_voice, voices_state], queue=False)
 
             tts_btn.click(
-                lambda key, txt, model, sim, stab, sty, sp, vname, vmap: text_to_speech(
-                    key, txt, model, sim, stab, sty, sp, vname, vmap
-                ),
+                lambda *args: (audio := text_to_speech(*args), audio),
                 inputs=[api_key, tts_text, model_id, similarity, stability, style, speed, voice_dropdown, voices_state],
-                outputs=audio_output,
+                outputs=[audio_output, tts_state],
             )
 
         with gr.Tab("Voice Changer Batch"):
