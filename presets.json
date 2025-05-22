@@ -1,0 +1,16 @@
+{
+  "Arrabbiato": {
+    "ssml_template": "<prosody rate = \"x-high\" pitch = \"medium\"><angry></angry></prosody>",
+    "similarity_boost": 0.5,
+    "stability": 0.5,
+    "style_exaggeration": 0.8,
+    "speed": 1
+  },
+  "Angiolina - Galassia": {
+    "ssml_template": "  <prosody pitch=\"high\" rate=\"fast\" >(disse con tono euforico)</prosody>",
+    "similarity_boost": 0.75,
+    "stability": 0.3,
+    "style_exaggeration": 0,
+    "speed": 1.1
+  }
+}
