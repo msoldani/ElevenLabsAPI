@@ -1,11 +1,33 @@
 import os
+import json
+import re
 import requests
 import gradio as gr
 
 ELEVEN_BASE_URL = "https://api.elevenlabs.io"
+PRESET_FILE = "presets.json"
 
 def headers(api_key: str):
     return {"xi-api-key": api_key.strip()}
+
+
+def load_presets() -> dict:
+    if os.path.exists(PRESET_FILE):
+        with open(PRESET_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_presets(presets: dict):
+    with open(PRESET_FILE, "w", encoding="utf-8") as f:
+        json.dump(presets, f, indent=2, ensure_ascii=False)
+
+
+def strip_inner_text(ssml: str) -> str:
+    match = re.search(r"(<[^>]+>)(.*)(</[^>]+>)", ssml, re.DOTALL)
+    if match:
+        return match.group(1) + "{text}" + match.group(3)
+    return ssml
 
 
 def fetch_voices(api_key: str):
@@ -21,7 +43,7 @@ def text_to_speech(api_key: str, text: str, model_id: str,
                    style_exaggeration: float, speed: float,
                    voice_name: str, voice_map: dict):
     voice_id = voice_map.get(voice_name, voice_name)
-    # clamp parameters to valid range
+    # clamp parameters to ElevenLabs limits
     stability = max(0.0, min(stability, 1.0))
     similarity_boost = max(0.0, min(similarity_boost, 1.0))
     style_exaggeration = max(0.0, min(style_exaggeration, 1.0))
@@ -61,30 +83,6 @@ def voice_changer_batch(api_key: str, audio_files: list, voice_name: str,
     return "\n".join(results)
 
 
-def voice_changer_single(api_key: str, audio_bytes: bytes, voice_name: str,
-                         voice_map: dict, stability: float, similarity_boost: float,
-                         style_exaggeration: float) -> bytes:
-    """Convert an in-memory audio to another voice and return the bytes."""
-    if audio_bytes is None:
-        raise gr.Error("Nessun audio da convertire: genera prima un clip TTS")
-
-    voice_id = voice_map.get(voice_name, voice_name)
-    stability = max(0.0, min(stability, 1.0))
-    similarity_boost = max(0.0, min(similarity_boost, 1.0))
-    style_exaggeration = max(0.0, min(style_exaggeration, 1.0))
-
-    files = {"audio": ("input.mp3", audio_bytes, "audio/mpeg")}
-    data = {
-        "stability": str(stability),
-        "similarity_boost": str(similarity_boost),
-        "style_exaggeration": str(style_exaggeration),
-    }
-    url = f"{ELEVEN_BASE_URL}/v1/speech-to-speech/{voice_id}/stream"
-    resp = requests.post(url, headers=headers(api_key), files=files, data=data)
-    resp.raise_for_status()
-    return resp.content
-
-
 def clone_voice(api_key: str, name: str, description: str, audio_files: list):
     files = []
     for af in audio_files:
@@ -101,52 +99,92 @@ def build_interface():
     with gr.Blocks(title="ElevenLabs Toolkit") as demo:
         api_key = gr.Textbox(label="API Key", type="password")
         voices_state = gr.State({})
+        presets_state = gr.State(load_presets())
 
         def refresh_voices(key):
             v = fetch_voices(key)
             return gr.update(choices=list(v.keys())), v
 
+        def refresh_presets():
+            p = load_presets()
+            return gr.update(choices=list(p.keys())), p
+
         with gr.Tab("TTS Avanzato"):
             refresh_btn = gr.Button("Aggiorna voci")
-            voice_dropdown = gr.Dropdown(label="Voce")
+            with gr.Row():
+                voice_dropdown = gr.Dropdown(label="Voce")
+                preset_dropdown = gr.Dropdown(label="Preset")
             tts_text = gr.Textbox(label="Testo (SSML)", lines=5)
             model_id = gr.Dropdown([
                 "eleven_monolingual_v1",
                 "eleven_multilingual_v2",
+                "eleven_turbo_v2_5",
+                "eleven_flash_v2_5"
             ], label="Modello vocale", value="eleven_multilingual_v2")
             similarity = gr.Slider(0, 1, 0.5, label="similarity_boost")
             stability = gr.Slider(0, 1, 0.5, label="stability")
             style = gr.Slider(0, 1, 0.0, label="style_exaggeration")
             speed = gr.Slider(0.7, 1.2, 1.0, label="speed")
-            tts_btn = gr.Button("Genera Audio")
+            with gr.Row():
+                tts_btn = gr.Button("Genera Audio")
+                save_btn = gr.Button("Salva Preset")
+            preset_name = gr.Textbox(label="Nome preset", visible=False)
+            confirm_save = gr.Button("Conferma", visible=False)
             audio_output = gr.Audio(label="Output")
-            tts_state = gr.State(value=None)
-
-            gr.Markdown("### Cambia voce dell'audio generato")
-            target_voice = gr.Dropdown(label="Voce target")
-            stab_conv = gr.Slider(0, 1, 0.5, label="stability")
-            sim_conv = gr.Slider(0, 1, 0.5, label="similarity_boost")
-            style_conv = gr.Slider(0, 1, 0.0, label="style_exaggeration")
-            change_btn = gr.Button("Cambia Voce")
-            changed_audio = gr.Audio(label="Output convertito")
-
-            change_btn.click(
-                lambda key, data, vname, vmap, stab, sim, sty: voice_changer_single(
-                    key, data, vname, vmap, stab, sim, sty
-                ),
-                inputs=[api_key, tts_state, target_voice, voices_state, stab_conv, sim_conv, style_conv],
-                outputs=changed_audio,
-            )
 
             refresh_btn.click(refresh_voices, inputs=api_key,
                               outputs=[voice_dropdown, voices_state])
-            refresh_btn.click(refresh_voices, inputs=api_key,
-                              outputs=[target_voice, voices_state], queue=False)
+            demo.load(refresh_presets, outputs=[preset_dropdown, presets_state])
+
+            def apply_preset(name, presets):
+                p = presets.get(name)
+                if not p:
+                    return [gr.update(), gr.update(), gr.update(), gr.update(), gr.update()]
+                return [
+                    gr.update(value=p["ssml_template"].replace("{text}", "")),
+                    gr.update(value=p["similarity_boost"]),
+                    gr.update(value=p["stability"]),
+                    gr.update(value=p["style_exaggeration"]),
+                    gr.update(value=p["speed"]),
+                ]
+
+            preset_dropdown.change(
+                apply_preset,
+                inputs=[preset_dropdown, presets_state],
+                outputs=[tts_text, similarity, stability, style, speed],
+            )
+
+            def open_save():
+                return gr.update(visible=True), gr.update(visible=True)
+
+            save_btn.click(open_save, outputs=[preset_name, confirm_save])
+
+            def do_save(name, text, sim, stab, sty, sp, presets):
+                if not name:
+                    return gr.update(), gr.update(), presets
+                tpl = strip_inner_text(text)
+                presets[name] = {
+                    "ssml_template": tpl,
+                    "similarity_boost": sim,
+                    "stability": stab,
+                    "style_exaggeration": sty,
+                    "speed": sp,
+                }
+                save_presets(presets)
+                return gr.update(value="", visible=False), gr.update(choices=list(presets.keys())), presets
+
+            confirm_save.click(
+                do_save,
+                inputs=[preset_name, tts_text, similarity, stability, style, speed, presets_state],
+                outputs=[preset_name, preset_dropdown, presets_state],
+            )
 
             tts_btn.click(
-                lambda *args: (audio := text_to_speech(*args), audio),
+                lambda key, txt, model, sim, stab, sty, sp, vname, vmap: text_to_speech(
+                    key, txt, model, sim, stab, sty, sp, vname, vmap
+                ),
                 inputs=[api_key, tts_text, model_id, similarity, stability, style, speed, voice_dropdown, voices_state],
-                outputs=[audio_output, tts_state],
+                outputs=audio_output,
             )
 
         with gr.Tab("Voice Changer Batch"):
@@ -182,6 +220,18 @@ def build_interface():
                 inputs=[api_key, clone_name, clone_desc, clone_files],
                 outputs=clone_res,
             )
+
+        with gr.Tab("Presets"):
+            preset_table = gr.Dataframe(headers=["name", "template", "similarity", "stability", "style", "speed"], interactive=False)
+
+            def list_presets(presets):
+                rows = [
+                    [n, p["ssml_template"], p["similarity_boost"], p["stability"], p["style_exaggeration"], p["speed"]]
+                    for n, p in presets.items()
+                ]
+                return rows
+
+            demo.load(lambda p: list_presets(p), inputs=presets_state, outputs=preset_table)
 
     return demo
 
