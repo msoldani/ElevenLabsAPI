@@ -1,16 +1,70 @@
 {
   "Arrabbiato": {
-    "ssml_template": "<prosody rate = \"x-high\" pitch = \"medium\"><angry></angry></prosody>",
+    "input_testuale": "(disse con tono arrabbiato)",
+    "rate": "x-fast",
+    "pitch": "medium",
     "similarity_boost": 0.5,
     "stability": 0.5,
     "style_exaggeration": 0.8,
     "speed": 1
   },
   "Angiolina - Galassia": {
-    "ssml_template": "  <prosody pitch=\"high\" rate=\"fast\" >(disse con tono euforico)</prosody>",
+    "input_testuale": "(disse con tono euforico)",
+    "rate": "fast",
+    "pitch": "high",
     "similarity_boost": 0.75,
     "stability": 0.3,
     "style_exaggeration": 0,
     "speed": 1.1
+  },
+  "Angiolina - Ist - Morbido": {
+    "input_testuale": "(disse con tono serio) Esiste un mondo dove la perfezione è in ogni dettaglio. Lexus. L’unica completamente ibrida con cambio automatico su ogni modello.",
+    "model_id": "eleven_multilingual_v2",
+    "similarity_boost": 0.8,
+    "stability": 0.65,
+    "style_exaggeration": 0.55,
+    "speed": 1.1,
+    "rate": "medium",
+    "pitch": "low"
+  },
+  "Giuseppe - Costa": {
+    "input_testuale": "Devo raccontarti questa cos: rimarrai a bocca aperta! Bene! Ci siamo sempre svegliati in un posto diverso - senza mai fare le valigie! Poi abbiamo scoperto che non devi essere di Capri per fare la colazione davanti ai Faraglioni. E che per vedere le stelle come si deve, bastava spegnere la luce. Ci siamo goduti tramonti unici al mondo, senza il \"resto\" del mondo. E tutto questo era tutto incluso!",
+    "model_id": "eleven_multilingual_v2",
+    "similarity_boost": 0.75,
+    "stability": 0.35,
+    "style_exaggeration": 1,
+    "speed": 1,
+    "rate": "medium",
+    "pitch": "high"
+  },
+  "Giuseppe - Costa - Euforico": {
+    "input_testuale": "Ci siamo sempre svegliati con un'alba nuova sul mare – senza mai disfare una valigia! (con tono euforico) ",
+    "model_id": "eleven_multilingual_v2",
+    "similarity_boost": 0.75,
+    "stability": 0.35,
+    "style_exaggeration": 1,
+    "speed": 1,
+    "rate": "fast",
+    "pitch": "x-high"
+  },
+  "Istituzionale - Up 1": {
+    "input_testuale": "(disse urlando di felicità)",
+    "model_id": "eleven_multilingual_v2",
+    "similarity_boost": 0.75,
+    "stability": 0.35,
+    "style_exaggeration": 1,
+    "speed": 1.1,
+    "rate": "fast",
+    "pitch": "x-high"
+  },
+  "Giuseppe - Istituzionale - UP": {
+    "input_testuale": "E solo per oggi - 50 stampe gratis per TE! Vieni a trovarci! (disse urlando di felicità)",
+    "model_id": "eleven_multilingual_v2",
+    "similarity_boost": 0.75,
+    "stability": 0.35,
+    "style_exaggeration": 1,
+    "speed": 1.1,
+    "rate": "fast",
+    "pitch": "high"
   }
 }
