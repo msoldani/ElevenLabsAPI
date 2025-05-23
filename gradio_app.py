@@ -74,12 +74,21 @@ def fetch_voices(api_key: str) -> dict:
         return {}
 
 def construct_ssml_from_text_and_prosody(text: str, rate: str, pitch: str) -> str:
-    escaped_text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    if rate == "default" and pitch == "default": return f"<speak>{escaped_text}</speak>"
+    # Il corpo della funzione inizia qui, indentato correttamente
+    if rate == "default" and pitch == "default":
+        # Se non c'è prosodia globale dai dropdown, avvolgi semplicemente con <speak>
+        return f"<speak>{text}</speak>"
+
+    # Questa parte viene eseguita se la prima condizione 'if' è falsa
     prosody_attributes = []
-    if rate != "default": prosody_attributes.append(f'rate="{rate}"')
-    if pitch != "default": prosody_attributes.append(f'pitch="{pitch}"')
-    return f'<speak><prosody {" ".join(prosody_attributes)}>{escaped_text}</prosody></speak>'
+    if rate != "default":
+        prosody_attributes.append(f'rate="{rate}"') # Correttamente indentato sotto il suo 'if'
+    if pitch != "default":
+        prosody_attributes.append(f'pitch="{pitch}"') # Correttamente indentato sotto il suo 'if'
+    
+    # Avvolgi il frammento di testo/SSML dell'utente con le impostazioni di prosodia e poi con i tag speak
+    # Questa riga 'return' deve essere allo stesso livello di 'prosody_attributes = []'
+    return f'<speak><prosody {" ".join(prosody_attributes)}>{text}</prosody></speak>'
 
 def text_to_speech(api_key: str, ssml_text: str, model_id: str,
                    similarity_boost: float, stability: float, style_exaggeration: float, speed_setting: float,
