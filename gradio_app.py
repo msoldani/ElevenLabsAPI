@@ -214,6 +214,16 @@ def build_interface():
                 voice_dropdown_tts = gr.Dropdown(label="Voce", scale=3) # Nome univoco per questo dropdown
                 #refresh_btn_tts_tab = gr.Button("Aggiorna", scale=1, size="sm") # Pulsante specifico della tab
                 preset_dropdown_tts = gr.Dropdown(label="Preset", scale=3) # Nome univoco
+            
+            tts_text_input = gr.Textbox(label="Testo da Sintetizzare", lines=5, placeholder="Inserisci qui il testo...")
+            num_generations_tts = gr.Number(label="Numero di generazioni", value=1, minimum=1, maximum=MAX_AUDIO_PREVIEWS * 2, step=1, precision=0)
+
+            
+            model_id_tts = gr.Dropdown(
+                choices=["eleven_monolingual_v1", "eleven_multilingual_v1", "eleven_multilingual_v2", 
+                         "eleven_turbo_v2", "eleven_turbo_v2_5", "eleven_english_sts_v2"], 
+                label="Modello vocale", value="eleven_multilingual_v2"
+            )
 
             with gr.Row():
                 prosody_rate_tts = gr.Dropdown(label="Prosody Rate", choices=["default", "x-slow", "slow", "medium", "fast", "x-fast"], value="default")
@@ -226,15 +236,6 @@ def build_interface():
             with gr.Row():
                 style_tts = gr.Slider(minimum=0, maximum=1, value=0.0, label="Style Exaggeration", step=0.05)
                 speed_slider_tts = gr.Slider(minimum=0.7, maximum=1.2, value=1.0, label="Speed (Voice Setting)", step=0.05)
-            
-            tts_text_input = gr.Textbox(label="Testo da Sintetizzare", lines=5, placeholder="Inserisci qui il testo...")
-            num_generations_tts = gr.Number(label="Numero di generazioni", value=1, minimum=1, maximum=MAX_AUDIO_PREVIEWS * 2, step=1, precision=0)
-
-            model_id_tts = gr.Dropdown(
-                choices=["eleven_monolingual_v1", "eleven_multilingual_v1", "eleven_multilingual_v2", 
-                         "eleven_turbo_v2", "eleven_turbo_v2_5", "eleven_english_sts_v2"], 
-                label="Modello vocale", value="eleven_multilingual_v2"
-            )
             
             with gr.Row():
                 generate_audio_btn_tts = gr.Button("Genera Audio (.wav)", variant="primary")
@@ -427,7 +428,7 @@ def build_interface():
 
 def main():
     demo = build_interface()
-    demo.launch(debug=True)
+    demo.launch(debug=True, share=True)
 
 if __name__ == "__main__":
    main()
