@@ -74,37 +74,41 @@ def fetch_voices(api_key: str) -> dict:
         return {}
 
 def construct_ssml_from_text_and_prosody(text: str, rate: str, pitch: str) -> str:
-    # Il corpo della funzione inizia qui, indentato correttamente
-    if rate == "default" and pitch == "default":
-        # Se non c'è prosodia globale dai dropdown, avvolgi semplicemente con <speak>
-        return f"<speak>{text}</speak>"
-
-    # Questa parte viene eseguita se la prima condizione 'if' è falsa
+    if rate == "default" and pitch == "default": return f"<speak>{text}</speak>"
     prosody_attributes = []
-    if rate != "default":
-        prosody_attributes.append(f'rate="{rate}"') # Correttamente indentato sotto il suo 'if'
-    if pitch != "default":
-        prosody_attributes.append(f'pitch="{pitch}"') # Correttamente indentato sotto il suo 'if'
-    
-    # Avvolgi il frammento di testo/SSML dell'utente con le impostazioni di prosodia e poi con i tag speak
-    # Questa riga 'return' deve essere allo stesso livello di 'prosody_attributes = []'
+    if rate != "default": prosody_attributes.append(f'rate="{rate}"')
+    if pitch != "default": prosody_attributes.append(f'pitch="{pitch}"')
     return f'<speak><prosody {" ".join(prosody_attributes)}>{text}</prosody></speak>'
 
+# MODIFICATO: Aggiunto emotional_prompt_text
 def text_to_speech(api_key: str, ssml_text: str, model_id: str,
                    similarity_boost: float, stability: float, style_exaggeration: float, speed_setting: float,
-                   voice_name: str, voice_map: dict, output_format_param: str = DEFAULT_PCM_OUTPUT):
+                   voice_name: str, voice_map: dict, emotional_prompt_text: str = None, # NUOVO parametro
+                   output_format_param: str = DEFAULT_PCM_OUTPUT):
     voice_id = voice_map.get(voice_name, voice_name) 
     if not voice_id: raise gr.Error("Nome/ID della voce non valido.")
+    
     payload = {
-        "text": ssml_text, "model_id": model_id,
+        "text": ssml_text, 
+        "model_id": model_id,
         "voice_settings": {
             "stability": max(0.0, min(stability, 1.0)),
             "similarity_boost": max(0.0, min(similarity_boost, 1.0)),
             "style_exaggeration": max(0.0, min(style_exaggeration, 1.0)),
-            "speed": max(0.7, min(speed_setting, 1.2)), 
+            "speed": max(0.5, min(speed_setting, 2.0)), 
             "use_speaker_boost": True,
-        },
+        }
     }
+    # Aggiungi next_text se fornito. Verifica se l'API lo supporta come parametro di primo livello
+    # o se deve essere in generation_config.
+    if emotional_prompt_text and emotional_prompt_text.strip():
+        # Assumendo che next_text sia un parametro supportato nel payload principale.
+        # Altrimenti, potrebbe essere necessario inserirlo in "generation_config": {"next_text": emotional_prompt_text}
+        # a seconda delle specifiche API per il modello in uso.
+        payload["next_text"] = emotional_prompt_text.strip() 
+        # Potrebbe essere anche "previous_text" o un altro nome, a seconda dell'API.
+        # L'utente ha specificato "next-text", che in JSON diventa "next_text".
+
     url = f"{ELEVEN_BASE_URL}/v1/text-to-speech/{voice_id}/stream?output_format={output_format_param}"
     try:
         r = requests.post(url, json=payload, headers=headers(api_key), stream=True)
@@ -121,8 +125,11 @@ def text_to_speech(api_key: str, ssml_text: str, model_id: str,
     except requests.exceptions.RequestException as e:
         error_detail = str(e)
         if e.response is not None:
-            try: error_detail = e.response.json().get('detail', {}).get('message', e.response.text)
-            except json.JSONDecodeError: error_detail = e.response.text
+            try: 
+                error_json = e.response.json()
+                error_detail = error_json.get('detail', {}).get('message', str(error_json))
+            except json.JSONDecodeError: 
+                error_detail = e.response.text
         raise gr.Error(f"Errore API TTS: {error_detail}")
     except Exception as e: raise gr.Error(f"Errore TTS imprevisto: {e}")
 
@@ -176,54 +183,31 @@ def clone_voice(api_key: str, name: str, description: str, audio_files_list: lis
             except: pass
 
 def build_interface():
-    # Operazioni di setup iniziali
     os.makedirs(GENERATED_AUDIO_DIR, exist_ok=True)
-
     with gr.Blocks(title="ElevenLabs Toolkit", theme=gr.themes.Ocean()) as demo:
-        # Stati globali (non visibili, definiti presto)
         voices_state = gr.State({})
         presets_state = gr.State(load_presets())
+        global_take_counter_state = gr.State(0) 
 
-        # MODIFICATO: Riga superiore per API Key e pulsante di aggiornamento globale
-        with gr.Row(elem_id="api_key_top_row",equal_height=True):
+        with gr.Row(elem_id="api_key_top_row"):
             api_key_input_global = gr.Textbox(
-                label="API Key ElevenLabs", 
-                type="password", 
-                lines=1, 
-                scale=4, # Textbox occupa più spazio
+                label="API Key ElevenLabs", type="password", lines=1, scale=4,
                 placeholder="Inserisci la tua API Key di ElevenLabs qui"
             )
-            refresh_button_global = gr.Button( # Pulsante globale per aggiornare
-                "Carica Dati", # Etichetta per aggiornamento globale
-                scale=1, 
-                
-            )
+            refresh_button_global = gr.Button("Carica Dati", scale=1, size="sm")
+            refresh_btn_tts_tab = gr.Button("Aggiorna", scale=1, size="sm")
         
-        # Funzione helper per aggiornare le voci e i preset (usata da entrambi i pulsanti di refresh)
-        def refresh_voices_and_presets_action(key_val): # Rinominata per evitare conflitto con nome componente
+        def refresh_voices_and_presets_action(key_val):
             v_map = fetch_voices(key_val) 
             p_map = load_presets()
             v_choices = list(v_map.keys()) if v_map else []
             p_choices = list(p_map.keys()) if p_map else []
-            # Gli output saranno mappati ai componenti specifici nel .click()
             return gr.update(choices=v_choices), v_map, gr.update(choices=p_choices), p_map
 
-        # Le definizioni delle schede (Tabs) iniziano qui
-        with gr.Tab("TTS Avanzato") as tts_tab: # Assegna un nome alla tab se devi referenziarla
+        with gr.Tab("TTS Avanzato") as tts_tab:
             with gr.Row(equal_height=True):
-                voice_dropdown_tts = gr.Dropdown(label="Voce", scale=3) # Nome univoco per questo dropdown
-                #refresh_btn_tts_tab = gr.Button("Aggiorna", scale=1, size="sm") # Pulsante specifico della tab
-                preset_dropdown_tts = gr.Dropdown(label="Preset", scale=3) # Nome univoco
-            
-            tts_text_input = gr.Textbox(label="Testo da Sintetizzare", lines=5, placeholder="Inserisci qui il testo...")
-            num_generations_tts = gr.Number(label="Numero di generazioni", value=1, minimum=1, maximum=MAX_AUDIO_PREVIEWS * 2, step=1, precision=0)
-
-            
-            model_id_tts = gr.Dropdown(
-                choices=["eleven_monolingual_v1", "eleven_multilingual_v1", "eleven_multilingual_v2", 
-                         "eleven_turbo_v2", "eleven_turbo_v2_5", "eleven_english_sts_v2"], 
-                label="Modello vocale", value="eleven_multilingual_v2"
-            )
+                voice_dropdown_tts = gr.Dropdown(label="Voce", scale=3)
+                preset_dropdown_tts = gr.Dropdown(label="Preset", scale=3)
 
             with gr.Row():
                 prosody_rate_tts = gr.Dropdown(label="Prosody Rate", choices=["default", "x-slow", "slow", "medium", "fast", "x-fast"], value="default")
@@ -231,11 +215,23 @@ def build_interface():
             
             gr.Markdown("#### Parametri Voce")
             with gr.Row():
-                similarity_tts = gr.Slider(minimum=0, maximum=1, value=0.75, label="Similarity Boost", step=0.05)
-                stability_tts = gr.Slider(minimum=0, maximum=1, value=0.75, label="Stability", step=0.05)
+                similarity_tts = gr.Slider(minimum=0, maximum=1, value=0.75, label="Similarity Boost", step=0.01)
+                stability_tts = gr.Slider(minimum=0, maximum=1, value=0.75, label="Stability", step=0.01)
             with gr.Row():
-                style_tts = gr.Slider(minimum=0, maximum=1, value=0.0, label="Style Exaggeration", step=0.05)
-                speed_slider_tts = gr.Slider(minimum=0.7, maximum=1.2, value=1.0, label="Speed (Voice Setting)", step=0.05)
+                style_tts = gr.Slider(minimum=0, maximum=1, value=0.0, label="Style Exaggeration", step=0.01)
+                speed_slider_tts = gr.Slider(minimum=0.5, maximum=2.0, value=1.0, label="Speed (Voice Setting)", step=0.05) 
+            
+            tts_text_input = gr.Textbox(label="Testo da Sintetizzare (SSML supportato)", lines=5, placeholder="Inserisci qui il testo o SSML...")
+            # NUOVO: Textbox per Prompt Emotivo
+            emotional_prompt_input_tts = gr.Textbox(label="Prompt Emotivo (per 'next_text')", lines=2, placeholder="Eventuale testo per guidare l'emozione/contesto successivo...")
+            
+            num_generations_tts = gr.Number(label="Numero di generazioni", value=1, minimum=1, maximum=MAX_AUDIO_PREVIEWS * 2, step=1, precision=0)
+
+            model_id_tts = gr.Dropdown(
+                choices=["eleven_monolingual_v1", "eleven_multilingual_v1", "eleven_multilingual_v2", 
+                         "eleven_turbo_v2", "eleven_turbo_v2_5", "eleven_english_sts_v2"], 
+                label="Modello vocale", value="eleven_multilingual_v2"
+            )
             
             with gr.Row():
                 generate_audio_btn_tts = gr.Button("Genera Audio (.wav)", variant="primary")
@@ -253,62 +249,80 @@ def build_interface():
             gr.Markdown("### Tutti i File Generati (per Download)")
             all_generated_files_dw_tts = gr.Files(label="File generati", visible=False, file_count="multiple", interactive=False)
 
-            # Eventi per la tab TTS Avanzato
-            #refresh_btn_tts_tab.click(
-                #refresh_voices_and_presets_action, 
-                #inputs=api_key_input_global, # Usa la API key globale
-                #outputs=[voice_dropdown_tts, voices_state, preset_dropdown_tts, presets_state]
-            #)
+            refresh_btn_tts_tab.click(
+                refresh_voices_and_presets_action, 
+                inputs=api_key_input_global,
+                outputs=[voice_dropdown_tts, voices_state, preset_dropdown_tts, presets_state]
+            )
             
+            # MODIFICATO: apply_preset_func per includere emotional_prompt
             def apply_preset_func(name, presets_dict_state):
                 p = presets_dict_state.get(name)
-                num_outputs = 8 
+                # text, model, similarity, stability, style, speed, rate, pitch, emotional_prompt
+                num_outputs = 9 
                 if not p: return [gr.update()]*num_outputs
                 return [
                     p.get("input_testuale", ""), p.get("model_id", "eleven_multilingual_v2"),
                     p.get("similarity_boost", 0.75), p.get("stability", 0.75),
                     p.get("style_exaggeration", 0.0), p.get("speed", 1.0), 
                     p.get("rate", "default"), p.get("pitch", "default"),
+                    p.get("emotional_prompt", "") # NUOVO: per emotional_prompt_input_tts
                 ]
             preset_dropdown_tts.change(apply_preset_func, inputs=[preset_dropdown_tts, presets_state],
-                                   outputs=[tts_text_input, model_id_tts, similarity_tts, stability_tts, style_tts, speed_slider_tts, prosody_rate_tts, prosody_pitch_tts])
+                                   outputs=[tts_text_input, model_id_tts, similarity_tts, stability_tts, style_tts, 
+                                            speed_slider_tts, prosody_rate_tts, prosody_pitch_tts, emotional_prompt_input_tts]) # NUOVO output
 
             def open_save_preset_ui(): return gr.update(visible=True), gr.update(visible=True)
             save_preset_btn_tts.click(open_save_preset_ui, outputs=[preset_name_input_tts, confirm_save_preset_btn_tts])
 
-            def do_save_preset_func(name, txt, mid, sim, stab, sty, speed_val, rate, pitch, current_presets):
+            # MODIFICATO: do_save_preset_func per includere emotional_prompt
+            def do_save_preset_func(name, txt, emotional_prompt, mid, sim, stab, sty, speed_val, rate, pitch, current_presets): # Aggiunto emotional_prompt
                 if not name:
                     gr.Warning("Nome preset non può essere vuoto.")
                     return gr.update(visible=True), gr.update(visible=True), gr.update(), current_presets
                 current_presets[name] = {
-                    "input_testuale": txt, "model_id": mid, "similarity_boost": sim, "stability": stab,
+                    "input_testuale": txt, "emotional_prompt": emotional_prompt, # NUOVO
+                    "model_id": mid, "similarity_boost": sim, "stability": stab,
                     "style_exaggeration": sty, "speed": speed_val, "rate": rate, "pitch": pitch,
                 }
                 save_presets(current_presets)
                 gr.Info(f"Preset '{name}' salvato!")
                 return gr.update(value="", visible=False), gr.update(visible=False), gr.update(choices=list(current_presets.keys())), current_presets
+            
+            # MODIFICATO: inputs per do_save_preset_func
             confirm_save_preset_btn_tts.click(do_save_preset_func,
-                                   inputs=[preset_name_input_tts, tts_text_input, model_id_tts, similarity_tts, stability_tts, style_tts, speed_slider_tts, prosody_rate_tts, prosody_pitch_tts, presets_state],
+                                   inputs=[preset_name_input_tts, tts_text_input, emotional_prompt_input_tts, # NUOVO input
+                                           model_id_tts, similarity_tts, stability_tts, style_tts, 
+                                           speed_slider_tts, prosody_rate_tts, prosody_pitch_tts, presets_state],
                                    outputs=[preset_name_input_tts, confirm_save_preset_btn_tts, preset_dropdown_tts, presets_state])
             
-            def handle_tts_generation(curr_api_key, txt_in, p_rate, p_pitch, n_gens, curr_model, 
-                                      sim_val, stab_val, style_val, speed_val, v_name, v_map):
+            # MODIFICATO: handle_tts_generation per includere emotional_prompt e global_take_counter_state
+            def handle_tts_generation(curr_api_key, txt_in, emotional_prompt_val, # NUOVO input
+                                      p_rate, p_pitch, n_gens, curr_model, 
+                                      sim_val, stab_val, style_val, speed_val, v_name, v_map,
+                                      current_global_take): 
                 if not curr_api_key: raise gr.Error("API Key mancante!")
                 if not txt_in.strip(): raise gr.Error("Testo non può essere vuoto!")
                 if not v_name: raise gr.Error("Seleziona una voce!")
+                
                 ssml = construct_ssml_from_text_and_prosody(txt_in, p_rate, p_pitch)
                 generated_final_paths = []
                 current_date_str = datetime.datetime.now().strftime("%Y%m%d")
                 sanitized_voice_name = sanitize_filename(v_name if v_name else "UnknownVoice")
                 base_filename_prefix = f"{current_date_str}_{sanitized_voice_name}_TTS"
+                local_take_counter = current_global_take 
 
                 for i in range(int(n_gens)):
                     gr.Info(f"Generazione audio {i+1} di {int(n_gens)}...")
                     temp_wav_path = None
                     try:
-                        temp_wav_path = text_to_speech(curr_api_key, ssml, curr_model, sim_val, stab_val, style_val, speed_val, v_name, v_map)
-                        take_num = i + 1
-                        final_filename = f"{base_filename_prefix}_take{take_num}.wav"
+                        local_take_counter += 1 
+                        current_take_for_filename = local_take_counter
+                        # Passa emotional_prompt_val a text_to_speech
+                        temp_wav_path = text_to_speech(curr_api_key, ssml, curr_model, sim_val, stab_val, style_val, speed_val, 
+                                                       v_name, v_map, emotional_prompt_text=emotional_prompt_val) # NUOVO argomento
+                        
+                        final_filename = f"{base_filename_prefix}_take{current_take_for_filename}.wav"
                         final_path = os.path.join(GENERATED_AUDIO_DIR, final_filename)
                         shutil.copy(temp_wav_path, final_path)
                         generated_final_paths.append(final_path)
@@ -321,6 +335,7 @@ def build_interface():
                             except Exception as e_rem: gr.Warning(f"Impossibile rimuovere file temporaneo {temp_wav_path}: {e_rem}")
                 
                 gr.Info(f"Generati {len(generated_final_paths)} file(s) in '{GENERATED_AUDIO_DIR}'.")
+                updated_global_take_counter = local_take_counter if generated_final_paths else current_global_take
                 preview_updates = []
                 for i in range(MAX_AUDIO_PREVIEWS):
                     if i < len(generated_final_paths):
@@ -328,14 +343,18 @@ def build_interface():
                     else:
                         preview_updates.append(gr.update(value=None, visible=False, label=f"Anteprima {i+1}"))
                 files_dw_update = gr.update(value=generated_final_paths if generated_final_paths else None, visible=bool(generated_final_paths))
-                return tuple(preview_updates + [files_dw_update])
+                return tuple(preview_updates + [files_dw_update, updated_global_take_counter])
 
-            tts_outputs = audio_previews_tts + [all_generated_files_dw_tts]
-            generate_audio_btn_tts.click(handle_tts_generation,
-                          inputs=[api_key_input_global, tts_text_input, prosody_rate_tts, prosody_pitch_tts, num_generations_tts, 
-                                  model_id_tts, similarity_tts, stability_tts, style_tts, speed_slider_tts, 
-                                  voice_dropdown_tts, voices_state],
-                          outputs=tts_outputs)
+            # MODIFICATO: Inputs e Outputs per tts_btn.click per includere emotional_prompt e global_take_counter_state
+            tts_btn_inputs = [
+                api_key_input_global, tts_text_input, emotional_prompt_input_tts, # NUOVO input
+                prosody_rate_tts, prosody_pitch_tts, num_generations_tts, 
+                model_id_tts, similarity_tts, stability_tts, style_tts, speed_slider_tts, 
+                voice_dropdown_tts, voices_state, global_take_counter_state 
+            ]
+            tts_btn_outputs = audio_previews_tts + [all_generated_files_dw_tts, global_take_counter_state] 
+
+            generate_audio_btn_tts.click(handle_tts_generation, inputs=tts_btn_inputs, outputs=tts_btn_outputs)
 
         with gr.Tab("Voice Changer Batch") as vc_tab:
             refresh_btn_vc_tab = gr.Button("Aggiorna voci")
@@ -345,8 +364,8 @@ def build_interface():
             conv_btn_vc = gr.Button("Converti", variant="primary")
             result_box_vc = gr.Textbox(label="Risultati Conversione", lines=5, interactive=False)
 
-            refresh_btn_vc_tab.click(refresh_voices_and_presets_action, inputs=api_key_input_global, # Usa API key globale
-                               outputs=[voice_dropdown_vc, voices_state, preset_dropdown_tts, presets_state]) # Aggiorna anche il preset_dropdown principale
+            refresh_btn_vc_tab.click(refresh_voices_and_presets_action, inputs=api_key_input_global,
+                               outputs=[voice_dropdown_vc, voices_state, preset_dropdown_tts, presets_state])
 
             def handle_vc_batch(curr_api_key, files_list, vname, vmap, odir):
                 if not curr_api_key: raise gr.Error("API Key mancante!")
@@ -354,6 +373,7 @@ def build_interface():
                 if not vname: raise gr.Error("Seleziona una voce.")
                 return voice_changer_batch(curr_api_key, files_list, vname, vmap, odir)
             conv_btn_vc.click(handle_vc_batch, inputs=[api_key_input_global, files_in_vc, voice_dropdown_vc, voices_state, out_dir_vc], outputs=result_box_vc)
+
 
         with gr.Tab("Voice Cloning") as clone_tab:
             clone_name_clone = gr.Textbox(label="Nome voce", lines=1, placeholder="Nome per la nuova voce clonata")
@@ -371,21 +391,24 @@ def build_interface():
                 return clone_voice(curr_api_key, name_val, desc_val, files_list_val)
             clone_btn_clone.click(handle_clone, inputs=[api_key_input_global, clone_name_clone, clone_desc_clone, clone_files_clone], outputs=clone_res_clone)
 
+
         with gr.Tab("Gestione Presets") as presets_manage_tab:
+            # MODIFICATO: Aggiunta colonna "Prompt Emotivo"
             presets_df_manage = gr.DataFrame(
-                headers=["Nome", "Testo (Input)", "Modello ID", "Similarity", "Stability", "Style", "Speed", "Rate", "Pitch"], 
+                headers=["Nome", "Testo (Input)", "Prompt Emotivo", "Modello ID", "Similarity", "Stability", "Style", "Speed", "Rate", "Pitch"], 
                 interactive=False 
             )
             with gr.Row():
                 delete_preset_dropdown_manage = gr.Dropdown(label="Seleziona Preset da Eliminare", scale=3)
                 confirm_delete_btn_manage = gr.Button("Elimina Preset Selezionato", scale=1, variant="stop")
 
+            # MODIFICATO: list_presets_for_ui per includere emotional_prompt
             def list_presets_for_ui(presets_data):
                 rows, names = [], list(presets_data.keys())
                 for name in names:
                     p = presets_data[name]
-                    rows.append([name, p.get("input_testuale",""), p.get("model_id",""), 
-                                 p.get("similarity_boost",""), p.get("stability",""), 
+                    rows.append([name, p.get("input_testuale",""), p.get("emotional_prompt",""), # NUOVO
+                                 p.get("model_id",""), p.get("similarity_boost",""), p.get("stability",""), 
                                  p.get("style_exaggeration",""), p.get("speed",""), 
                                  p.get("rate",""), p.get("pitch","")])
                 return rows, gr.update(choices=names, value=None) 
@@ -406,29 +429,22 @@ def build_interface():
             
             confirm_delete_btn_manage.click(
                 delete_selected_p, inputs=[delete_preset_dropdown_manage, presets_state], outputs=[presets_state]
-            ).then( # Aggiorna il dropdown dei preset nella tab TTS Avanzato
+            ).then(
                 lambda p_state_upd: gr.update(choices=list(p_state_upd.keys())), inputs=presets_state, outputs=preset_dropdown_tts
             )
         
-        # Collegamento del pulsante di aggiornamento globale (definito DOPO che i componenti di output sono stati creati)
         refresh_button_global.click(
             refresh_voices_and_presets_action,
             inputs=api_key_input_global,
             outputs=[voice_dropdown_tts, voices_state, preset_dropdown_tts, presets_state] 
-            # Questo aggiorna i dropdown nella tab TTS e gli stati globali.
-            # Altri dropdown (es. in Voice Changer) hanno il loro pulsante di refresh dedicato
-            # o potrebbero essere aggiornati tramite .change() su voices_state/presets_state se necessario.
         )
-        # Caricamento iniziale globale (già gestito dal demo.load nella tab TTS per i dropdown principali)
-        # Un demo.load specifico per il pulsante globale non è necessario se quello nella tab TTS si occupa del caricamento iniziale.
-        # Tuttavia, per coerenza, il demo.load globale può essere questo:
         demo.load(refresh_voices_and_presets_action, inputs=api_key_input_global, outputs=[voice_dropdown_tts, voices_state, preset_dropdown_tts, presets_state])
 
     return demo
 
 def main():
     demo = build_interface()
-    demo.launch(debug=True, share=True)
+    demo.launch(debug=True, share=True) # Rimosso share=True per impostazione predefinita, puoi aggiungerlo se necessario
 
 if __name__ == "__main__":
    main()
