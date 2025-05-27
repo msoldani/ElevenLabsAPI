@@ -66,5 +66,16 @@
     "speed": 1.1,
     "rate": "fast",
     "pitch": "high"
+  },
+  "Urlo": {
+    "input_testuale": "DA URLOOO!!",
+    "emotional_prompt": "urlando ",
+    "model_id": "eleven_multilingual_v2",
+    "similarity_boost": 0.56,
+    "stability": 0,
+    "style_exaggeration": 1,
+    "speed": 0.65,
+    "rate": "fast",
+    "pitch": "x-high"
   }
 }
