@@ -80,10 +80,12 @@ def construct_ssml_from_text_and_prosody(text: str, rate: str, pitch: str) -> st
     if pitch != "default": prosody_attributes.append(f'pitch="{pitch}"')
     return f'<speak><prosody {" ".join(prosody_attributes)}>{text}</prosody></speak>'
 
-# MODIFICATO: Aggiunto emotional_prompt_text
+# MODIFICATO: Aggiunto previous_text_prompt
 def text_to_speech(api_key: str, ssml_text: str, model_id: str,
                    similarity_boost: float, stability: float, style_exaggeration: float, speed_setting: float,
-                   voice_name: str, voice_map: dict, emotional_prompt_text: str = None, # NUOVO parametro
+                   voice_name: str, voice_map: dict, 
+                   previous_text_prompt: str = None, # NUOVO parametro per previous_text
+                   emotional_prompt_text: str = None, 
                    output_format_param: str = DEFAULT_PCM_OUTPUT):
     voice_id = voice_map.get(voice_name, voice_name) 
     if not voice_id: raise gr.Error("Nome/ID della voce non valido.")
@@ -95,19 +97,16 @@ def text_to_speech(api_key: str, ssml_text: str, model_id: str,
             "stability": max(0.0, min(stability, 1.0)),
             "similarity_boost": max(0.0, min(similarity_boost, 1.0)),
             "style_exaggeration": max(0.0, min(style_exaggeration, 1.0)),
-            "speed": max(0.5, min(speed_setting, 2.0)), 
+            "speed": max(0.7, min(speed_setting, 1.2)), 
             "use_speaker_boost": True,
         }
     }
-    # Aggiungi next_text se fornito. Verifica se l'API lo supporta come parametro di primo livello
-    # o se deve essere in generation_config.
+    
+    if previous_text_prompt and previous_text_prompt.strip():
+        payload["previous_text"] = previous_text_prompt.strip()
+        
     if emotional_prompt_text and emotional_prompt_text.strip():
-        # Assumendo che next_text sia un parametro supportato nel payload principale.
-        # Altrimenti, potrebbe essere necessario inserirlo in "generation_config": {"next_text": emotional_prompt_text}
-        # a seconda delle specifiche API per il modello in uso.
         payload["next_text"] = emotional_prompt_text.strip() 
-        # Potrebbe essere anche "previous_text" o un altro nome, a seconda dell'API.
-        # L'utente ha specificato "next-text", che in JSON diventa "next_text".
 
     url = f"{ELEVEN_BASE_URL}/v1/text-to-speech/{voice_id}/stream?output_format={output_format_param}"
     try:
@@ -189,13 +188,12 @@ def build_interface():
         presets_state = gr.State(load_presets())
         global_take_counter_state = gr.State(0) 
 
-        with gr.Row(elem_id="api_key_top_row"):
+        with gr.Row(elem_id="api_key_top_row",equal_height=True):
             api_key_input_global = gr.Textbox(
                 label="API Key ElevenLabs", type="password", lines=1, scale=4,
                 placeholder="Inserisci la tua API Key di ElevenLabs qui"
             )
-            refresh_button_global = gr.Button("Carica Dati", scale=1, size="sm")
-            refresh_btn_tts_tab = gr.Button("Aggiorna", scale=1, size="sm")
+            refresh_button_global = gr.Button("Carica Dati", scale=1)
         
         def refresh_voices_and_presets_action(key_val):
             v_map = fetch_voices(key_val) 
@@ -207,6 +205,7 @@ def build_interface():
         with gr.Tab("TTS Avanzato") as tts_tab:
             with gr.Row(equal_height=True):
                 voice_dropdown_tts = gr.Dropdown(label="Voce", scale=3)
+                # refresh_btn_tts_tab = gr.Button("Aggiorna", scale=1, size="sm") # Commentato come nel tuo codice
                 preset_dropdown_tts = gr.Dropdown(label="Preset", scale=3)
 
             with gr.Row():
@@ -215,15 +214,16 @@ def build_interface():
             
             gr.Markdown("#### Parametri Voce")
             with gr.Row():
-                similarity_tts = gr.Slider(minimum=0, maximum=1, value=0.75, label="Similarity Boost", step=0.01)
-                stability_tts = gr.Slider(minimum=0, maximum=1, value=0.75, label="Stability", step=0.01)
+                similarity_tts = gr.Slider(minimum=0, maximum=1, value=0.75, label="Similarity Boost", step=0.05)
+                stability_tts = gr.Slider(minimum=0, maximum=1, value=0.75, label="Stability", step=0.05)
             with gr.Row():
-                style_tts = gr.Slider(minimum=0, maximum=1, value=0.0, label="Style Exaggeration", step=0.01)
-                speed_slider_tts = gr.Slider(minimum=0.5, maximum=2.0, value=1.0, label="Speed (Voice Setting)", step=0.05) 
+                style_tts = gr.Slider(minimum=0, maximum=1, value=0.0, label="Style Exaggeration", step=0.05)
+                speed_slider_tts = gr.Slider(minimum=0.7, maximum=1.2, value=1.0, label="Speed (Voice Setting)", step=0.05)
             
             tts_text_input = gr.Textbox(label="Testo da Sintetizzare (SSML supportato)", lines=5, placeholder="Inserisci qui il testo o SSML...")
-            # NUOVO: Textbox per Prompt Emotivo
-            emotional_prompt_input_tts = gr.Textbox(label="Prompt Emotivo (per 'next_text')", lines=2, placeholder="Eventuale testo per guidare l'emozione/contesto successivo...")
+            # NUOVO: Textbox per Contesto Precedente
+            previous_text_input_tts = gr.Textbox(label="Contesto Precedente (previous_text)", lines=2, placeholder="Testo che precede quello da sintetizzare...")
+            emotional_prompt_input_tts = gr.Textbox(label="Prompt Emotivo (next_text)", lines=2, placeholder="Testo che segue e guida l'intonazione...")
             
             num_generations_tts = gr.Number(label="Numero di generazioni", value=1, minimum=1, maximum=MAX_AUDIO_PREVIEWS * 2, step=1, precision=0)
 
@@ -249,39 +249,40 @@ def build_interface():
             gr.Markdown("### Tutti i File Generati (per Download)")
             all_generated_files_dw_tts = gr.Files(label="File generati", visible=False, file_count="multiple", interactive=False)
 
-            refresh_btn_tts_tab.click(
-                refresh_voices_and_presets_action, 
-                inputs=api_key_input_global,
-                outputs=[voice_dropdown_tts, voices_state, preset_dropdown_tts, presets_state]
-            )
+            # refresh_btn_tts_tab.click(...) # Era commentato nel tuo codice
             
-            # MODIFICATO: apply_preset_func per includere emotional_prompt
+            # MODIFICATO: apply_preset_func per includere previous_text_prompt
             def apply_preset_func(name, presets_dict_state):
                 p = presets_dict_state.get(name)
-                # text, model, similarity, stability, style, speed, rate, pitch, emotional_prompt
-                num_outputs = 9 
+                # text, prev_text, emotional_prompt, model, similarity, stability, style, speed, rate, pitch
+                num_outputs = 10 
                 if not p: return [gr.update()]*num_outputs
                 return [
-                    p.get("input_testuale", ""), p.get("model_id", "eleven_multilingual_v2"),
+                    p.get("input_testuale", ""), 
+                    p.get("previous_text_prompt", ""), # NUOVO
+                    p.get("emotional_prompt", ""), 
+                    p.get("model_id", "eleven_multilingual_v2"),
                     p.get("similarity_boost", 0.75), p.get("stability", 0.75),
                     p.get("style_exaggeration", 0.0), p.get("speed", 1.0), 
-                    p.get("rate", "default"), p.get("pitch", "default"),
-                    p.get("emotional_prompt", "") # NUOVO: per emotional_prompt_input_tts
+                    p.get("rate", "default"), p.get("pitch", "default")
                 ]
             preset_dropdown_tts.change(apply_preset_func, inputs=[preset_dropdown_tts, presets_state],
-                                   outputs=[tts_text_input, model_id_tts, similarity_tts, stability_tts, style_tts, 
-                                            speed_slider_tts, prosody_rate_tts, prosody_pitch_tts, emotional_prompt_input_tts]) # NUOVO output
+                                   outputs=[tts_text_input, previous_text_input_tts, emotional_prompt_input_tts, # NUOVO output
+                                            model_id_tts, similarity_tts, stability_tts, style_tts, 
+                                            speed_slider_tts, prosody_rate_tts, prosody_pitch_tts])
 
             def open_save_preset_ui(): return gr.update(visible=True), gr.update(visible=True)
             save_preset_btn_tts.click(open_save_preset_ui, outputs=[preset_name_input_tts, confirm_save_preset_btn_tts])
 
-            # MODIFICATO: do_save_preset_func per includere emotional_prompt
-            def do_save_preset_func(name, txt, emotional_prompt, mid, sim, stab, sty, speed_val, rate, pitch, current_presets): # Aggiunto emotional_prompt
+            # MODIFICATO: do_save_preset_func per includere previous_text_prompt
+            def do_save_preset_func(name, txt, prev_text, emo_prompt, mid, sim, stab, sty, speed_val, rate, pitch, current_presets):
                 if not name:
                     gr.Warning("Nome preset non può essere vuoto.")
                     return gr.update(visible=True), gr.update(visible=True), gr.update(), current_presets
                 current_presets[name] = {
-                    "input_testuale": txt, "emotional_prompt": emotional_prompt, # NUOVO
+                    "input_testuale": txt, 
+                    "previous_text_prompt": prev_text, # NUOVO
+                    "emotional_prompt": emo_prompt, 
                     "model_id": mid, "similarity_boost": sim, "stability": stab,
                     "style_exaggeration": sty, "speed": speed_val, "rate": rate, "pitch": pitch,
                 }
@@ -289,15 +290,14 @@ def build_interface():
                 gr.Info(f"Preset '{name}' salvato!")
                 return gr.update(value="", visible=False), gr.update(visible=False), gr.update(choices=list(current_presets.keys())), current_presets
             
-            # MODIFICATO: inputs per do_save_preset_func
             confirm_save_preset_btn_tts.click(do_save_preset_func,
-                                   inputs=[preset_name_input_tts, tts_text_input, emotional_prompt_input_tts, # NUOVO input
+                                   inputs=[preset_name_input_tts, tts_text_input, previous_text_input_tts, emotional_prompt_input_tts, 
                                            model_id_tts, similarity_tts, stability_tts, style_tts, 
                                            speed_slider_tts, prosody_rate_tts, prosody_pitch_tts, presets_state],
                                    outputs=[preset_name_input_tts, confirm_save_preset_btn_tts, preset_dropdown_tts, presets_state])
             
-            # MODIFICATO: handle_tts_generation per includere emotional_prompt e global_take_counter_state
-            def handle_tts_generation(curr_api_key, txt_in, emotional_prompt_val, # NUOVO input
+            # MODIFICATO: handle_tts_generation per includere previous_text_prompt
+            def handle_tts_generation(curr_api_key, txt_in, prev_text_val, emo_prompt_val, 
                                       p_rate, p_pitch, n_gens, curr_model, 
                                       sim_val, stab_val, style_val, speed_val, v_name, v_map,
                                       current_global_take): 
@@ -318,9 +318,10 @@ def build_interface():
                     try:
                         local_take_counter += 1 
                         current_take_for_filename = local_take_counter
-                        # Passa emotional_prompt_val a text_to_speech
                         temp_wav_path = text_to_speech(curr_api_key, ssml, curr_model, sim_val, stab_val, style_val, speed_val, 
-                                                       v_name, v_map, emotional_prompt_text=emotional_prompt_val) # NUOVO argomento
+                                                       v_name, v_map, 
+                                                       previous_text_prompt=prev_text_val, # NUOVO argomento
+                                                       emotional_prompt_text=emo_prompt_val)
                         
                         final_filename = f"{base_filename_prefix}_take{current_take_for_filename}.wav"
                         final_path = os.path.join(GENERATED_AUDIO_DIR, final_filename)
@@ -345,9 +346,8 @@ def build_interface():
                 files_dw_update = gr.update(value=generated_final_paths if generated_final_paths else None, visible=bool(generated_final_paths))
                 return tuple(preview_updates + [files_dw_update, updated_global_take_counter])
 
-            # MODIFICATO: Inputs e Outputs per tts_btn.click per includere emotional_prompt e global_take_counter_state
             tts_btn_inputs = [
-                api_key_input_global, tts_text_input, emotional_prompt_input_tts, # NUOVO input
+                api_key_input_global, tts_text_input, previous_text_input_tts, emotional_prompt_input_tts, 
                 prosody_rate_tts, prosody_pitch_tts, num_generations_tts, 
                 model_id_tts, similarity_tts, stability_tts, style_tts, speed_slider_tts, 
                 voice_dropdown_tts, voices_state, global_take_counter_state 
@@ -357,7 +357,7 @@ def build_interface():
             generate_audio_btn_tts.click(handle_tts_generation, inputs=tts_btn_inputs, outputs=tts_btn_outputs)
 
         with gr.Tab("Voice Changer Batch") as vc_tab:
-            refresh_btn_vc_tab = gr.Button("Aggiorna voci")
+            refresh_btn_vc_tab = gr.Button("Aggiorna voci") # Questo pulsante era presente nel tuo ultimo codice
             voice_dropdown_vc = gr.Dropdown(label="Voce")
             files_in_vc = gr.Files(label="Audio da convertire (.mp3, .wav, etc.)", file_count="multiple", type="filepath")
             out_dir_vc = gr.Textbox(label="Cartella output", value="converted_audio_batch", lines=1)
@@ -373,7 +373,6 @@ def build_interface():
                 if not vname: raise gr.Error("Seleziona una voce.")
                 return voice_changer_batch(curr_api_key, files_list, vname, vmap, odir)
             conv_btn_vc.click(handle_vc_batch, inputs=[api_key_input_global, files_in_vc, voice_dropdown_vc, voices_state, out_dir_vc], outputs=result_box_vc)
-
 
         with gr.Tab("Voice Cloning") as clone_tab:
             clone_name_clone = gr.Textbox(label="Nome voce", lines=1, placeholder="Nome per la nuova voce clonata")
@@ -391,23 +390,21 @@ def build_interface():
                 return clone_voice(curr_api_key, name_val, desc_val, files_list_val)
             clone_btn_clone.click(handle_clone, inputs=[api_key_input_global, clone_name_clone, clone_desc_clone, clone_files_clone], outputs=clone_res_clone)
 
-
         with gr.Tab("Gestione Presets") as presets_manage_tab:
-            # MODIFICATO: Aggiunta colonna "Prompt Emotivo"
             presets_df_manage = gr.DataFrame(
-                headers=["Nome", "Testo (Input)", "Prompt Emotivo", "Modello ID", "Similarity", "Stability", "Style", "Speed", "Rate", "Pitch"], 
+                headers=["Nome", "Testo (Input)", "Contesto Prec.", "Prompt Emotivo", "Modello ID", "Similarity", "Stability", "Style", "Speed", "Rate", "Pitch"], 
                 interactive=False 
             )
             with gr.Row():
                 delete_preset_dropdown_manage = gr.Dropdown(label="Seleziona Preset da Eliminare", scale=3)
                 confirm_delete_btn_manage = gr.Button("Elimina Preset Selezionato", scale=1, variant="stop")
 
-            # MODIFICATO: list_presets_for_ui per includere emotional_prompt
             def list_presets_for_ui(presets_data):
                 rows, names = [], list(presets_data.keys())
                 for name in names:
                     p = presets_data[name]
-                    rows.append([name, p.get("input_testuale",""), p.get("emotional_prompt",""), # NUOVO
+                    rows.append([name, p.get("input_testuale",""), 
+                                 p.get("previous_text_prompt",""), p.get("emotional_prompt",""), # NUOVI
                                  p.get("model_id",""), p.get("similarity_boost",""), p.get("stability",""), 
                                  p.get("style_exaggeration",""), p.get("speed",""), 
                                  p.get("rate",""), p.get("pitch","")])
@@ -444,7 +441,7 @@ def build_interface():
 
 def main():
     demo = build_interface()
-    demo.launch(debug=True, share=True) # Rimosso share=True per impostazione predefinita, puoi aggiungerlo se necessario
+    demo.launch(debug=True, share=True)
 
 if __name__ == "__main__":
    main()
