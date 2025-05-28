@@ -77,5 +77,29 @@
     "speed": 0.65,
     "rate": "fast",
     "pitch": "x-high"
+  },
+  "Triste": {
+    "input_testuale": "Non sono più certa di quello che voglio...",
+    "previous_text_prompt": "Con tono triste e piangendo:",
+    "emotional_prompt": "Disse piangendo alla sua amica.",
+    "model_id": "eleven_multilingual_v2",
+    "similarity_boost": 0.75,
+    "stability": 0,
+    "style_exaggeration": 0.8,
+    "speed": 0.9,
+    "rate": "slow",
+    "pitch": "x-low"
+  },
+  "Euforico": {
+    "input_testuale": "Allora? Com'è andata la tua crociera?",
+    "previous_text_prompt": "Con tono euforico e curioso:",
+    "emotional_prompt": "Chiese alla sua amica.",
+    "model_id": "eleven_multilingual_v2",
+    "similarity_boost": 0.75,
+    "stability": 0.3,
+    "style_exaggeration": 0.9,
+    "speed": 1.1,
+    "rate": "fast",
+    "pitch": "x-high"
   }
 }
